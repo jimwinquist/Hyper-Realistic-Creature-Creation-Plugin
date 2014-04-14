@@ -1,0 +1,98 @@
+/*
+beginHelpText
+hrBuildGeneralMuscle.mel
+pthuriot
+06/04/2005
+
+-=UPDATES=-
+version 1.0
+06/04/2005	pthuriot	<description>
+endHelpText
+*/
+
+proc string hrBuildGeneralMuscle_createSurface (string $muscleName){
+	string $surface = `createNode nurbsSurface`;
+		
+	string $parent[] = `listRelatives -p -pa $surface`;
+	string $newName = `rename $parent[0] ($muscleName + "_#")`;
+	
+	if(!`objExists "initialShadingGroup"`)
+		warning("hrBuildGeneralMuscle_createSurface :: initialShadingGroup does not exist > no shader applied");
+	
+	sets -e -forceElement initialShadingGroup $newName;
+
+	string $shape[] = `listRelatives -s -pa $newName`;
+	return $shape[0];
+}
+
+proc hrBuildGeneralMuscle_connectPoint(string $selPtOnSurf, string $build, string $whichOne){
+	string $name[];
+	clear($name);
+	tokenize($selPtOnSurf, ".", $name);
+	string $shape[] = `listRelatives -s -pa $name[0]`;
+	if(!`objectType -i "nurbsSurface" $shape[0]`)
+		error("hrBuildMuscle_createMPoint :: cannot create pointOnSurfaceInfo on given shape node");
+		
+	string $partsA[];
+	clear($partsA);
+	string $partsB[];
+	clear($partsB);
+	tokenize($selPtOnSurf, "[", $partsA);
+	tokenize($partsA[1], "]", $partsB);
+	float $U = $partsB[0];
+	
+	clear($partsB);
+	tokenize ($partsA[2], "]", $partsB);
+	float $V = $partsB[0];
+
+	connectAttr -f ($shape[0] + ".worldSpace[0]") ($build+".connectionPt["+$whichOne+"].connectionSurface");
+	setAttr ($build+".connectionPt["+$whichOne+"].connectionU") $U;
+	setAttr ($build+".connectionPt["+$whichOne+"].connectionV") $V;
+	setAttr ($build+".connectionPt["+$whichOne+"].connectionUp") 0;
+	
+}
+
+global proc hrBuildGeneralMuscle(){
+	if(`window -exists hrBuildMuscleUI`)
+		deleteUI hrBuildMuscleUI;
+		
+	window -t "hrBuildMuscle UI v1.0" hrBuildMuscleUI;
+	scrollLayout;
+		string $col = `columnLayout -adj 1`;
+	
+		button -l "Select Type: Surface Points" -c ("selectMode -component; selectType -cv 0 -vertex 0 -subdivMeshPoint 0 -latticePoint 0 -particle 0 -editPoint 0 -curveParameterPoint 0 -surfaceParameterPoint 1 -puv 0 -polymeshEdge 0 -subdivMeshEdge 0 -isoparm 0 -surfaceEdge 0 -surfaceFace 0 -springComponent 0 -facet 0 -subdivMeshFace 0 -hull 0 -rotatePivot 0 -scalePivot 0 -jointPivot 0 -selectHandle 0 -localRotationAxis 0 -imagePlane 0;");
+		
+		string $text = `textFieldGrp -l "Muscle Name"`;
+		button -l "-=DO IT=-" -c ("hrBuildGeneralMuscle_doIt "+$text);
+		
+	
+	showWindow hrBuildMuscleUI;
+}
+
+
+global proc hrBuildGeneralMuscle_doIt(string $text){
+	//use default, generic name
+	string $muscleName = `textFieldGrp -q -tx $text`;
+	
+	string $selPtOnSurf[] = `ls -sl -flatten`;
+	int $howManySel = `size($selPtOnSurf)`;
+	if ($howManySel != 4)
+		error("hrBuildMuscle -> must select 4 nurbsSurface points");
+	
+	//create hrGeneralMuscle node
+	string $build = `createNode hrGeneralMuscle -name ($muscleName+"HRmuscle_#")`;
+	
+	//create muscleSurface; nurbs cylinder
+	string $muscleShape = `hrBuildGeneralMuscle_createSurface $muscleName`; 
+
+	//connect surfacePoints into muscleNode
+	string $mPoint[];
+	clear($mPoint);
+	for($i = 0; $i < $howManySel; $i++){
+		hrBuildGeneralMuscle_connectPoint $selPtOnSurf[$i] $build $i;
+	}
+	
+	connectAttr -f ($build+".muscleSurface")($muscleShape+".create");
+	
+	select -cl;
+}

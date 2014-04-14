@@ -1,0 +1,212 @@
+/*
+beginHelpText
+AEhrGeneralMuscleTemplate.mel
+pthuriot
+06/04/2005
+
+-=UPDATES=-
+version 1.0
+06/04/2005	pthuriot	<description>
+endHelpText
+*/
+
+global proc AEhrGeneralMuscleTemplate(string $nodeName)
+{
+	editorTemplate -beginScrollLayout;
+	editorTemplate -beginLayout "hrGeneralMuscle Attributes" -collapse 0;
+		
+		editorTemplate -suppress "internalMuscleHeights";
+		editorTemplate -suppress "internalMuscleWidths";
+		editorTemplate -suppress "internalVPoints";
+		editorTemplate -suppress "internalMuscleLength";
+		editorTemplate -suppress "internalInitialVolumes";
+		editorTemplate -suppress "internalMusclePositions";
+		editorTemplate -suppress "internalMuscleCurve";
+		editorTemplate -suppress "internalMuscleXsections";
+		editorTemplate -suppress "muscleSurface";
+		editorTemplate -suppress "connectionSurface";
+		
+		editorTemplate -addControl "calculateVolume";
+	
+		editorTemplate -beginLayout "Connection Controls" -collapse 0;
+		editorTemplate -callCustom "hrGeneralMuscleConnectionAttrs" "hrGeneralMuscleConnectionAttrs" "connectionPt";
+	
+		editorTemplate -endLayout;
+	
+	editorTemplate -endLayout;
+	
+	AEdependNodeTemplate $nodeName;
+	
+	editorTemplate -addExtraControls;
+	editorTemplate -endScrollLayout;	
+}
+
+global proc hrGeneralMuscleFlipConnection(string $nodeName, string $thisOne){	
+	float $x1 = `getAttr ($nodeName + "."+$thisOne+"VectorX")`;
+	setAttr ($nodeName + "."+$thisOne+"VectorX") ($x1*-1);
+	
+	float $x2 = `getAttr ($nodeName + "."+$thisOne+"VectorY")`;
+	setAttr ($nodeName + "."+$thisOne+"VectorY") ($x2*-1);
+	
+	float $x3 = `getAttr ($nodeName + "."+$thisOne+"VectorZ")`;
+	setAttr ($nodeName + "."+$thisOne+"VectorZ") ($x3*-1);
+}
+
+global proc float[] hrGeneralMuscleGetSurfShapeUV(string $nodeName, int $i){
+	string $conn[] = `listConnections -s 1 -d 0 ($nodeName+"["+$i+"].connectionSurface")`;
+	if(!`objExists $conn[0]`)
+		warning("getSurfShapeUV :: noSurfaceExists");
+	
+	float $returnMe[];
+	clear($returnMe);
+	$returnMe[0] = `getAttr ($conn[0]+".minValueU")`;
+	$returnMe[1] = `getAttr ($conn[0]+".maxValueU")`;
+	$returnMe[2] = `getAttr ($conn[0]+".minValueV")`;
+	$returnMe[3] = `getAttr ($conn[0]+".maxValueV")`;
+	
+	return $returnMe;
+}
+
+global proc hrGeneralMuscleFlipCheck(string $attrName, int $i, string $checkBox){
+	int $val = `checkBox -q -v $checkBox`;
+	setAttr ($attrName+"["+$i+"].connectionFlip") $val;
+}
+
+global proc hrGeneralMuscleUpCheck(string $attrName, int $i, string $radioGrp){
+	int $val = `radioButtonGrp -q -sl $radioGrp`;
+	setAttr ($attrName+"["+$i+"].connectionUp") ($val-1);
+}
+
+global proc hrGeneralMuscleVectorLock(string $attrName, string $checkBox){
+	int $val = `checkBox -q -v $checkBox`;
+	setAttr $attrName $val;
+}
+
+global proc hrGeneralMuscleUpdatePoint(string $attrName, int $i){
+	string $sel[] = `ls -sl`;
+	if(`size($sel)` < 1)
+		error("Select one point on surface");
+	
+	string $selPtOnSurf = $sel[0];
+	
+	string $name[];
+	clear($name);
+	tokenize($selPtOnSurf, ".", $name);
+	string $shape[] = `listRelatives -s -pa $name[0]`;
+	if(!`objectType -i "nurbsSurface" $shape[0]`)
+		error("hrGeneralMuscleUpdatePoint :: selected surface not nurbsSurface");
+		
+	string $partsA[];
+	clear($partsA);
+	string $partsB[];
+	clear($partsB);
+	tokenize($selPtOnSurf, "[", $partsA);
+	tokenize($partsA[1], "]", $partsB);
+	float $U = $partsB[0];
+	
+	clear($partsB);
+	tokenize ($partsA[2], "]", $partsB);
+	float $V = $partsB[0];
+
+	if(!`isConnected ($shape[0] + ".worldSpace[0]") ($attrName+"["+$i+"].connectionSurface")`)
+		connectAttr -f ($shape[0] + ".worldSpace[0]") ($attrName+"["+$i+"].connectionSurface");
+	setAttr ($attrName+"["+$i+"].connectionU") $U;
+	setAttr ($attrName+"["+$i+"].connectionV") $V;
+	setAttr ($attrName+"["+$i+"].connectionUp") 0;
+	setAttr ($attrName+"["+$i+"].connectionFlip") 0;	
+}
+
+global proc hrGeneralMuscleConnectionAttrs(string $attrName){
+	if(`columnLayout -exists hrGeneralMuscleConnectionAttrsUI`)
+		deleteUI hrGeneralMuscleConnectionAttrsUI;
+		
+	string	$tokenAry[];
+	clear($tokenAry);
+	
+	tokenize($attrName, ".", $tokenAry);
+
+	setUITemplate -pst attributeEditorTemplate;
+	columnLayout -adjustableColumn 1 hrGeneralMuscleConnectionAttrsUI;
+	frameLayout -cl 0 -cll 1 -l ("Connection Points");
+		columnLayout -adj 1;
+				
+		for($i = 0; $i < 4; $i++){
+			frameLayout -cl 0 -cll 1 -l ("Connection Point "+$i);
+					columnLayout -adj 1;
+						float $UV[] = `hrGeneralMuscleGetSurfShapeUV $attrName $i`;
+						attrFieldSliderGrp -l "Connection U" -min $UV[0] -max $UV[1] -at ($attrName+"["+$i+"].connectionU");
+						attrFieldSliderGrp -l "Connection V" -min $UV[2] -max $UV[3] -at ($attrName+"["+$i+"].connectionV");
+				
+						int $val = `getAttr ($attrName+"["+$i+"].connectionFlip")`;
+						string $valChange = `checkBox -l "Flip Connection Point" -v $val -align "left"`;
+						checkBox -e -cc ("hrGeneralMuscleFlipCheck "+$attrName +" "+ $i +" "+$valChange) $valChange;
+						
+						int $whichOne = `getAttr ($attrName+"["+$i+"].connectionUp")`;
+						string $whichUp = `radioButtonGrp -numberOfRadioButtons 3
+					 		-label ("Up Point     ") -labelArray3 "Up" "Left" "Forward"
+					 		-sl ($whichOne + 1)
+					 		-columnAlign3 "left" "left" "left"
+					 		`;
+						radioButtonGrp -e -cc ("hrGeneralMuscleUpCheck "+$attrName +" "+ $i +" "+$whichUp) $whichUp;
+			
+						button -l "Update ConnectionPoint to Selected"
+							-c ("hrGeneralMuscleUpdatePoint "+$attrName+" "+$i);
+							
+						separator -w 10;
+							
+						setParent..;
+				setParent..;
+		}	
+		setParent..;
+	setParent..;
+		frameLayout -cl 0 -cll 1 -l ("Rest Height/ Widths");
+			columnLayout -adj 1;
+				
+					attrFieldSliderGrp -l "Origin Rest Height" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restHeightO");
+			
+					separator -w 10;
+					separator -w 10;
+					
+					attrFieldSliderGrp -l "Ov Rest Height" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restHeightOv");
+					attrFieldSliderGrp -l "Ov Rest Width" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restWidthOv");
+				
+					separator -w 10;
+					
+					attrFieldSliderGrp -l "Ov Vector X" -fmn -10000 -min -25 -fmx 10000 -max 25 -at ($tokenAry[0]+".originVectorX");
+					attrFieldSliderGrp -l "Ov Vector Y" -fmn -10000 -min -25 -fmx 10000 -max 25 -at ($tokenAry[0]+".originVectorY");
+					attrFieldSliderGrp -l "Ov Vector Z" -fmx 10000 -max 25 -fmn -10000 -min -25 -at ($tokenAry[0]+".originVectorZ");
+					int $Lval = `getAttr ($tokenAry[0]+".originVectorLock")`;
+					string $LvalChange = `checkBox -l "Origin Vector Lock" -v $Lval -align "left"`;
+					checkBox -e -cc ("hrGeneralMuscleVectorLock "+ ($tokenAry[0]+".originVectorLock") + " " + $LvalChange) $LvalChange;
+			
+					button -l "Flip originVector by -1" -c ("hrGeneralMuscleFlipConnection "+ $tokenAry[0] + " origin");
+					
+					separator -w 10;
+					separator -w 10;
+					
+					attrFieldSliderGrp -l "Iv Rest Height" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restHeightIv");
+					attrFieldSliderGrp -l "Iv Rest Width" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restWidthIv");
+					
+					separator -w 10;
+					
+					attrFieldSliderGrp -l "Iv Vector X" -fmn -10000 -min -25 -fmx 10000 -max 25 -at ($tokenAry[0]+".insertionVectorX");
+					attrFieldSliderGrp -l "Iv Vector Y" -fmn -10000 -min -25 -fmx 10000 -max 25 -at ($tokenAry[0]+".insertionVectorY");
+					attrFieldSliderGrp -l "Iv Vector Z" -fmx 10000 -max 25 -fmn -10000 -min -25 -at ($tokenAry[0]+".insertionVectorZ");
+					
+					int $Lval = `getAttr ($tokenAry[0]+".insertionVectorLock")`;
+					string $LvalChange = `checkBox -l "Insertion Vector Lock" -v $Lval -align "left"`;
+					checkBox -e -cc ("hrGeneralMuscleVectorLock "+ ($tokenAry[0]+".insertionVectorLock") + " " + $LvalChange) $LvalChange;
+			
+					button -l "Flip insertionVector by -1" -c ("hrGeneralMuscleFlipConnection "+ $tokenAry[0] + " insertion");
+					
+					separator -w 10;
+					separator -w 10;
+					
+					attrFieldSliderGrp -l "Insertion Rest Height" -min 0.0 -fmx 10000 -max 25 -at ($tokenAry[0]+".restHeightI");
+			
+					separator -w 10;
+				setParent..;
+		setParent..;
+	
+	setUITemplate -ppt;
+}

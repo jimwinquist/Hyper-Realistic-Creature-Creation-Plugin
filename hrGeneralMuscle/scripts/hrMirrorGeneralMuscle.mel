@@ -1,0 +1,256 @@
+/*
+beginHelpText
+hrMirrorGeneralMuscle.mel
+pthuriot
+06/04/2005
+
+-=UPDATES=-
+version 1.0
+06/04/2005	pthuriot	<description>
+endHelpText
+*/
+
+proc string[] hrMirrorGeneralMuscle_checkForNode(string $selected){
+	string $returnMe[];
+	clear($returnMe);
+	$returnMe[0] = 0;
+	
+	string $shape[] = `listRelatives -s -pa $selected`;
+	if(`objExists $shape[0]`){
+		string $conn[] = `listConnections -s 1 -d 0 ($shape[0]+".create")`;
+		if(`objExists $conn[0]`){
+			if(`objectType -i "hrGeneralMuscle" $conn[0]`){
+				$returnMe[0]= 1;
+				$returnMe[1]= $conn[0];
+			}
+		}
+	}
+	
+	return $returnMe;
+}
+
+proc string hrMirrorGeneralMuscle_getMirroredSurf(string $mirrorSurf){		
+	string $mirrorName = $mirrorSurf;
+	
+	string $lastPart[];
+	clear($lastPart);
+	tokenize ($mirrorSurf, "|", $lastPart);
+	
+	if(`gmatch $lastPart[(size($lastPart)-1)] "*Lf*"`)
+	{
+		string $newName = `substitute "Lf" $lastPart[(size($lastPart)-1)] "Rt"`;	
+		if (`objExists $newName`)
+			$mirrorName = $newName;
+	}	
+	else if (`gmatch $lastPart[(size($lastPart)-1)] "*Rt*"`)
+	{
+		string $newName = `substitute "Rt" $lastPart[(size($lastPart)-1)] "Lf"`;
+		if (`objExists $newName`)
+			$mirrorName = $newName;
+	}
+
+	return $mirrorName;
+}
+
+proc string hrMirrorGeneralMuscle_getMirroredName(string $muscle){		
+	string $newName;
+	
+	string $lastPart[];
+	clear($lastPart);
+	tokenize($muscle, "|", $lastPart);
+
+	if(`gmatch $lastPart[(size($lastPart)-1)] "*Lf*"`){
+		$newName = `substitute "Lf" $lastPart[(size($lastPart)-1)] "Rt"`;	
+	}	
+	else if (`gmatch $lastPart[(size($lastPart)-1)] "*Rt*"`){
+		$newName = `substitute "Rt" $lastPart[(size($lastPart)-1)] "Lf"`;
+	}
+
+	return $newName;
+}
+
+proc string[] hrMirrorGeneralMuscle_getMirroredConnSurfs(string $muscleNode){
+	string $returnMe[];
+	clear($returnMe);
+	
+	for($i = 0; $i < 4; $i++){
+		string $connSurf[] = `listConnections -s 1 -d 0 -p 1 ($muscleNode + ".connectionPt["+$i+"].connectionSurface")`;
+		$returnMe[$i] = `hrMirrorGeneralMuscle_getMirroredSurf $connSurf[0]`;
+	}
+
+	return $returnMe;
+}
+
+proc string hrMirrorGeneralMuscle_getShader (string $xForm){
+	string $shape[] = `listRelatives -s -pa $xForm`;
+	string $shadEngs[] = `listConnections -s 0 -d 1 ($shape[0] +".instObjGroups[0]")`;
+	string $returnString = "";
+	if (size($shadEngs) > 0) {
+		$returnString =	$shadEngs[0];
+	}
+	return $returnString;
+} 
+
+proc string hrMirrorGeneralMuscle_createSurface (string $muscleName, string $shader){
+	string $surface = `createNode nurbsSurface`;
+		
+	string $parent[] = `listRelatives -p -pa $surface`;
+	string $newName = `rename $parent[0] ($muscleName)`;
+		
+	if(`objExists $shader`)
+		sets -e -forceElement $shader $newName;
+
+	string $shape[] = `listRelatives -s -pa $newName`;
+	return $shape[0];
+}
+
+proc int hrMirrorGeneralMuscle_sameSurfTest(string $oldMuscle, string $newConPt, int $i){
+	int $returnMe = 0;
+		
+	string $oldConn[] = `listConnections -s 1 -d 0 -p 1 ($oldMuscle+".connectionPt["+$i+"].connectionSurface")`;
+	if($oldConn[0] == $newConPt)
+		$returnMe = 1;
+	
+	return $returnMe;
+}
+
+proc hrMirrorGeneralMuscle_connectToSameSurf(string $oldMuscle, string $muscleNode, int $i, int $uv){
+	string $conSurf[] = `listConnections -s 1 -d 0 -p 0 ($oldMuscle + ".connectionPt["+$i+"].connectionSurface")`;
+	string $pointOnSurf = `createNode pointOnSurfaceInfo`;
+	string $closestPointOnSurf = `createNode closestPointOnSurface`;
+	connectAttr -f ($conSurf[0]+".worldSpace")($pointOnSurf+".inputSurface");
+	connectAttr -f ($conSurf[0]+".worldSpace")($closestPointOnSurf+".inputSurface");
+	string $loc[] = `spaceLocator -p 0 0 0`;
+	string $locShape[] = `listRelatives -s -pa $loc[0]`;
+	connectAttr -f ($locShape[0]+".worldPosition")($closestPointOnSurf+".inPosition");
+	
+	float $u = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionU")`;		
+	float $v = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionV")`;
+	setAttr ($pointOnSurf+".parameterU") $u;
+	setAttr ($pointOnSurf+".parameterV") $v;
+	
+	connectAttr -f ($pointOnSurf+".position")($loc[0]+".t");
+	disconnectAttr ($pointOnSurf+".position")($loc[0]+".t");
+	
+	select -cl;
+	string $grp = `group $loc[0]`;
+	xform -os -piv 0 0 0 $grp;
+	setAttr ($grp+".sx") -1;
+	
+	
+	float $newU = `getAttr ($closestPointOnSurf+".parameterU")`;
+	float $newV = `getAttr ($closestPointOnSurf+".parameterV")`;
+	
+	setAttr ($muscleNode + ".connectionPt["+$i+"].connectionU") $newU;
+	setAttr ($muscleNode + ".connectionPt["+$i+"].connectionV") $newV;
+	
+	delete $pointOnSurf $closestPointOnSurf	$grp;	
+}
+
+proc string[] hrMirrorGeneralMuscle_createMuscle(string $oldMuscle, string $shader, string $connSurfs[], string $newName){
+	string $mName = `substring $newName 1 (size($newName)-2)`;
+	string $muscleNode = `createNode hrGeneralMuscle -name ($mName+"HRmuscle_#")`;
+	string $muscleShape = `hrMirrorGeneralMuscle_createSurface $newName $shader`; 
+	for($i = 0; $i < 4; $i++){
+		connectAttr -f $connSurfs[$i] ($muscleNode+".connectionPt["+$i+"].connectionSurface");
+		
+		int $sameSurfTest = `hrMirrorGeneralMuscle_sameSurfTest $oldMuscle $connSurfs[$i] $i`;
+		if($sameSurfTest == 0){
+			float $u = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionU")`;
+			setAttr ($muscleNode + ".connectionPt["+$i+"].connectionU") $u;
+			float $v = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionV")`;
+			setAttr ($muscleNode + ".connectionPt["+$i+"].connectionV") $v;
+		}
+		else
+			hrMirrorGeneralMuscle_connectToSameSurf $oldMuscle $muscleNode $i 0;
+			
+		int $up = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionUp")`;
+		setAttr ($muscleNode + ".connectionPt["+$i+"].connectionUp") $up;
+		int $f = `getAttr ($oldMuscle + ".connectionPt["+$i+"].connectionFlip")`;
+		if($f == 0)
+			setAttr ($muscleNode + ".connectionPt["+$i+"].connectionFlip") 1;
+		else
+			setAttr ($muscleNode + ".connectionPt["+$i+"].connectionFlip") 0;
+	}
+	
+	// get and set attrs fromTo
+	float $oX = `getAttr ($oldMuscle + ".originVectorX")`;
+	setAttr ($muscleNode + ".originVectorX") $oX;
+	//setAttr ($muscleNode + ".originVectorX") ($oX*-1);
+	float $oY = `getAttr ($oldMuscle + ".originVectorY")`;
+	//setAttr ($muscleNode + ".originVectorY") $oY;
+	setAttr ($muscleNode + ".originVectorY") ($oY*-1);
+	float $oZ = `getAttr ($oldMuscle + ".originVectorZ")`;
+	setAttr ($muscleNode + ".originVectorZ") $oZ;
+	//setAttr ($muscleNode + ".originVectorZ") ($oZ*-1);
+	int $oL = `getAttr ($oldMuscle + ".originVectorLock")`;
+	setAttr ($muscleNode + ".originVectorLock") $oL;
+			
+	float $iX = `getAttr ($oldMuscle + ".insertionVectorX")`;
+	setAttr ($muscleNode + ".insertionVectorX") $iX;
+	//setAttr ($muscleNode + ".insertionVectorX") ($iX*-1);
+	float $iY = `getAttr ($oldMuscle + ".insertionVectorY")`;
+	//setAttr ($muscleNode + ".insertionVectorY") $iY;
+	setAttr ($muscleNode + ".insertionVectorY") ($iY*-1);
+	float $iZ = `getAttr ($oldMuscle + ".insertionVectorZ")`;
+	setAttr ($muscleNode + ".insertionVectorZ") $iZ;
+	//setAttr ($muscleNode + ".insertionVectorZ") ($iZ*-1);
+	int $iL = `getAttr ($oldMuscle + ".insertionVectorLock")`;
+	setAttr ($muscleNode + ".insertionVectorLock") $iL;
+
+	float $rHO = `getAttr ($oldMuscle + ".restHeightO")`;
+	setAttr ($muscleNode + ".restHeightO") $rHO;
+
+	float $rH0v = `getAttr ($oldMuscle + ".restHeightOv")`;
+	setAttr ($muscleNode + ".restHeightOv") $rH0v;
+	float $rW0v = `getAttr ($oldMuscle + ".restWidthOv")`;
+	setAttr ($muscleNode + ".restWidthOv") $rW0v;
+
+	float $rHIv = `getAttr ($oldMuscle + ".restHeightIv")`;
+	setAttr ($muscleNode + ".restHeightIv") $rHIv;
+	float $rWIv = `getAttr ($oldMuscle + ".restWidthIv")`;
+	setAttr ($muscleNode + ".restWidthIv") $rWIv;
+
+	float $rIO = `getAttr ($oldMuscle + ".restHeightI")`;
+	setAttr ($muscleNode + ".restHeightI") $rIO;
+
+	connectAttr -f ($muscleNode+".muscleSurface")($muscleShape+".create");
+	
+	string $returnMe[];
+	clear($returnMe);
+	$returnMe[0] = $muscleNode;
+	$returnMe[1] = $muscleShape;
+	return $returnMe;
+}
+
+//beginProcHelp====================================================================
+//	PROCEDURE:		hrMirrorGeneralMuscle (global)
+//	ARGUEMENTS:		<list the arguements, if any>
+//	RETURN:				<returns, if any>
+//	DESCRIPTION:	<general description of proc>
+//endProcHelp======================================================================
+global proc hrMirrorGeneralMuscle(){
+	string $muscleShapes[];
+	clear($muscleShapes);
+	string $muscleNodes[];
+	clear($muscleNodes);
+	int $curNode = 0;
+	
+	string $sel[] = `ls -sl`;
+	for($each in $sel){
+		string $node[] = `hrMirrorGeneralMuscle_checkForNode $each`;
+		if($node[0] == 1){
+			$muscleShapes[$curNode] = $each;
+			$muscleNodes[$curNode++] = $node[1];
+		}
+	}
+
+	for($i = 0; $i < size($muscleShapes); $i++){
+		string $newName = `hrMirrorGeneralMuscle_getMirroredName $muscleShapes[$i]`;
+		string $connSurfs[] = `hrMirrorGeneralMuscle_getMirroredConnSurfs $muscleNodes[$i]`;
+		string $shader = `hrMirrorGeneralMuscle_getShader $muscleShapes[$i]`;
+		string $newMuscle[] = `hrMirrorGeneralMuscle_createMuscle $muscleNodes[$i] $shader $connSurfs $newName`;
+		print ("\n// Result: "+ $newMuscle[0] + " "+$newMuscle[1]);
+	}
+	
+}

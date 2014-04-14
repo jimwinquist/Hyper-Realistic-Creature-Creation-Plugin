@@ -1,0 +1,56 @@
+/*
+
+Title: vertSnapDeformer.mel
+
+Required: vertSnapDeformer.mll (or vertSnapDeformer.so)
+
+Author: Erick Miller
+
+Date: April 2005 
+
+Version: 1.0
+
+Description:
+	
+	Select the driver poly mesh (the one that will get snapped to) and 
+	then shift select the driven object (the one you want to deform)
+	and run the command:
+	
+	vertSnapDeformer();
+
+
+Return: 	creates & returns a deformer node of "vertSnapDeformer" type.
+
+*/
+
+global proc string[] vertSnapDeformer()
+{
+	string $defr[];
+	string $selected[] = `ls -sl`;
+	if( ! `pluginInfo -q -l vertSnapDeformer` ){
+		eval "catch (`loadPlugin -qt vertSnapDeformer`)";
+	}
+	if( `pluginInfo -q -l vertSnapDeformer` )
+	{	
+		if ( `size $selected` != 2 ||
+			(
+				(   ! size(`listRelatives -type "mesh" $selected[0]`)
+				  && `nodeType $selected[0]` != "mesh" )
+				 ||
+				 (   ! size(`listRelatives -type "mesh" $selected[1]`)
+				  && `nodeType $selected[1]` != "mesh" 				  
+				)
+			)
+		   ){
+			error " Select the polygon driver geometry first, and the polygon mesh to be deformed last.";
+		}
+		else
+		{
+			$defr = `deformer -type vertSnapDeformer $selected[1]`;
+			connectAttr ($selected[0]+".worldMesh[0]") ($defr[0]+".vertSnapInput");
+			setAttr ($defr[0]+".initialize") 1;
+		}
+	}
+	else{ error "Copy the vertSnapDeformer plugin into the MAYA_PLUGIN_PATH.";  }
+	return( $defr );
+}
